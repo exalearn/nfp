@@ -79,8 +79,6 @@ def batched_segment_op(
 
     """
 
-    if data_mask is None:
-        data_mask = tf.ones(tf.shape(data)[:-1], dtype=tf.bool)
 
     # Prior to flattening, offset rows of segment_ids to preserve batches
     batch_size = tf.shape(data, out_type=segment_ids.dtype)[0]
@@ -88,8 +86,14 @@ def batched_segment_op(
     ids_offset = segment_ids + tf.expand_dims(offsets, 1)
 
     # Mask and flatten the data and segment_ids
-    flat_data = tf.boolean_mask(data, data_mask)
-    flat_ids = tf.boolean_mask(ids_offset, data_mask)
+    if data_mask is None:
+        dShape = data.shape
+        seg_id_shape = segment_ids.shape
+        flat_data = tf.reshape(data,[-1,data.shape[-1]])
+        flat_ids  = tf.reshape(ids_offset,[-1,])
+    else:
+        flat_data = tf.boolean_mask(data, data_mask)
+        flat_ids = tf.boolean_mask(ids_offset, data_mask)
 
     reduction = getattr(tf.math, f"unsorted_segment_{reduction}")
 
@@ -168,14 +172,17 @@ class ConcatDense(tf_layers.Layer):
         self.supports_masking = True
 
     def build(self, input_shape):
-        num_features = input_shape[0][-1]
-        self.concat = tf_layers.Concatenate()
-        self.dense1 = tf_layers.Dense(2 * num_features, activation="relu")
-        self.dense2 = tf_layers.Dense(num_features)
+        self.num_inputs = len(input_shape)
+        self.num_features = input_shape[0][-1]
+        self.dense1 = [ tf_layers.Dense(2*self.num_features, name =f'Concat_Dense1_{i}') for i in range(self.num_inputs) ]
+        self.add    = tf_layers.Add(name="Concat_Add")
+        self.activation = tf_layers.Activation('relu')
+        self.dense2 = tf_layers.Dense(self.num_features)
 
     def call(self, inputs, mask=None, **kwargs):
-        output = self.concat(inputs)
-        output = self.dense1(output)
+        output = [ self.dense1[i](inputs[i]) for i in range(self.num_inputs) ]
+        output = self.add(output)
+        output = self.activation(output)
         output = self.dense2(output)
         return output
 
